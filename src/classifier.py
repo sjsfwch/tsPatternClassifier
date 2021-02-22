@@ -80,24 +80,24 @@ class CNN(nn.Module):
     def __init__(self,classes=50):
         super(CNN, self).__init__()
         self.conv1 = nn.Sequential(  
-            nn.Conv1d(1, 16, 3,1,1),  
+            nn.Conv1d(1, 16, 5,1,1),  
             nn.BatchNorm1d(16),
             nn.ReLU(),
             nn.MaxPool1d(kernel_size=2), 
         )
         self.conv2 = nn.Sequential( 
-            nn.Conv1d(16, 32, 3, 1, 1), 
+            nn.Conv1d(16, 32, 5, 1, 1), 
             nn.BatchNorm1d(32),
             nn.ReLU(),
             nn.MaxPool1d(2), 
         )
-        # self.conv3 = nn.Sequential( 
-        #     nn.Conv2d(32, 64, 3, 1, 1), 
-        #     nn.BatchNorm2d(64),
-        #     nn.ReLU(),
-        #     nn.MaxPool2d(2), 
-        # )
-        self.flatten = nn.Sequential(nn.Linear(224, 80),nn.BatchNorm1d(80),nn.ReLU())   
+        self.conv3 = nn.Sequential( 
+            nn.Conv1d(32, 64, 3, 1, 1), 
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.MaxPool1d(2), 
+        )
+        self.flatten = nn.Sequential(nn.Linear(192, 80),nn.BatchNorm1d(80),nn.ReLU())   
         self.out = nn.Linear(80, classes)   
         self.dropout=nn.Dropout(0.5)
 
@@ -105,7 +105,7 @@ class CNN(nn.Module):
         # print(x)
         x = self.conv1(x)
         x = self.conv2(x)        
-        # x = self.conv3(x)        
+        x = self.conv3(x)        
         x = x.view(x.size(0), -1) 
         x=self.dropout(x)
         x = self.flatten(x)
@@ -116,8 +116,9 @@ class CNN(nn.Module):
 
 
 if __name__=="__main__":
-    data=np.load("dataset.npy")
-    label=np.load("label.npy")
+    # 根目录下运行
+    data=np.load("data/dataset.npy")
+    label=np.load("data/label.npy")
     # svmClassifier(data,label)
     # rfClassifier(data,label)
     # gbdtClassifier(data,label)
@@ -126,12 +127,10 @@ if __name__=="__main__":
     epochs = 200
 
     initial_lr = 1e-4
-    batch_size=32
-    criterion=nn.CrossEntropyLoss()
-    best_score=0
+    batch_size = 32
+    criterion = nn.CrossEntropyLoss()
+    best_score = 0
     epoch_list,train_acc_list,test_acc_list,best_acc_list=[],[],[],[]
-    data=np.load("dataset.npy")
-    label=np.load("label.npy")
 
     # load data
     train_image,test_image ,train_label, test_label = train_test_split(data,label,test_size=0.25,random_state=40)
@@ -149,7 +148,9 @@ if __name__=="__main__":
         criterion.cuda()
     # train model using train_image and train_label
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.8)
+    max_f=0
     for epoch in range(epochs):
+        y_true,y_pred=np.array([],dtype=np.int),np.array([],dtype=np.int)
         acc_list=[]
         model.train()
         bar=tqdm(train_loader)
@@ -160,25 +161,24 @@ if __name__=="__main__":
                 b[1]=b[1].cuda()
             out=model(b[0])
             batch_pred = out.data.max(1)[1]
+            y_true=np.append(y_true,b[1].numpy())
+            y_pred=np.append(y_pred,batch_pred.numpy())
             acc = batch_pred.eq(b[1]).float().mean() 
             acc=acc.cpu().detach().numpy()
             acc_list.append(acc)
             loss = criterion(out,b[1])
             loss.backward()
             optimizer.step()
+        p1,r1,f1,_=precision_recall_fscore_support(y_true,y_pred,labels=np.unique(y_pred),average="weighted")
+        # print(f"precision: {p}\nrecall: {r}\nf-score: {f}")
         scheduler.step()
         train_acc=np.mean(acc_list)
-        
+        # x=set(y_true)-set(y_pred)
         acc_list=[]
         with torch.no_grad():
-        ### Your Code Here ###
             model.eval()
-            # target_num = torch.zeros((1,classes))
-            # predict_num = torch.zeros((1,classes))
-            # acc_num = torch.zeros((1,classes))
             test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=True, num_workers=4)
-            # bar = tqdm(test_loader)
-            # pred = []
+            y_true,y_pred=np.array([],dtype=np.int),np.array([],dtype=np.int)
             for step,b in enumerate(test_loader):
                 if is_gpu:
                     b[0]=b[0].cuda()
@@ -186,12 +186,16 @@ if __name__=="__main__":
                 out=model(b[0])
                 # print(out)
                 batch_pred = out.data.max(1)[1]
+                y_true=np.append(y_true,b[1].numpy())
+                y_pred=np.append(y_pred,batch_pred.numpy())
                 acc = batch_pred.eq(b[1]).float().mean() 
                 acc=acc.cpu().detach().numpy()
                 acc_list.append(acc)
                 # pred.append(batch_pred)
-            
+            p2,r2,f2,_=precision_recall_fscore_support(y_true,y_pred,labels=np.unique(y_pred),average="weighted")
             test_acc=np.mean(acc_list)
             if test_acc>best_score:
                 best_score=test_acc
-            print('Epoch:{}, Loss:{:.5f}, train_acc:{:.5f}, test_acc:{:.5f}, best:{:.5f}'.format(epoch+1, loss.item(),train_acc,test_acc,best_score))
+            max_f=max(max_f,f2)
+            # print('Epoch:{}, Loss:{:.5f}, train_acc:{:.5f}, test_acc:{:.5f}, best:{:.5f}'.format(epoch+1, loss.item(),train_acc,test_acc,best_score))
+            print("Epoch:{}, Loss:{:.5f}\ntrain_p:{:.5f}, train_r:{:.5f}, train_f:{:.5f},test_p:{:.5f}, test_r:{:.5f}, test_f:{:.5f},best_f:{:.5f}".format(epoch+1,loss.item(),p1,r1,f1,p2,r2,f2,max_f))
