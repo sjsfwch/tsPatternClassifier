@@ -1,2 +1,4 @@
 *.ipynb
 .vscode
+.DS_Store
+*.pyc 
